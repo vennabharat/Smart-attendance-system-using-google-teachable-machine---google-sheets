@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Smart Attendance — Teachable Machine + Google Sheets</title>
+<style>
+body { font-family: Arial, sans-serif; max-width:900px; margin:20px auto; padding:10px; }
+#webcam-container, #status { margin-top:10px }
+video { border:1px solid #ddd; border-radius:6px }
+.controls { margin-top:10px }
+label { display:inline-block; width:140px }
+.btn { padding:8px 12px; border-radius:6px; border:1px solid #666; cursor:pointer; background:#f3f3f3 }
+</style>
+</head>
+<body>
+<h1>Smart Attendance (Teachable Machine → Google Sheets)</h1>
+<p>Simple, single-page app: lets your webcam detect a student (using your Teachable Machine model) and save attendance to a Google Sheet.</p>
+
+
+<div>
+<div>
+<label>Model URL (from Teachable Machine export):</label>
+<input id="model-url" type="text" style="width:60%" placeholder="Paste model.json URL here" />
+</div>
+<div style="margin-top:8px">
+<label>Google Apps Script Web App URL:</label>
+<input id="webapp-url" type="text" style="width:60%" placeholder="Paste your Apps Script web app URL here" />
+</div>
+<div class="controls">
+<button id="load-model" class="btn">Load Model</button>
+<button id="start-webcam" class="btn">Start Webcam</button>
+<button id="auto-mark" class="btn">Toggle Auto-Mark</button>
+</div>
+</div>
+
+<div id="webcam-container">
+<video id="webcam" autoplay playsinline width="480" height="360"></video>
+<div id="status"></div>
+</div>
+
+<div style="margin-top:12px">
+<label>Choose class (student):</label>
+<select id="class-select"></select>
+<label style="margin-left:10px">Confidence threshold:</label>
+<input id="threshold" type="number" value="0.85" step="0.01" min="0.5" max="1" style="width:80px" />
+<button id="mark-btn" class="btn">Mark Attendance Now</button>
+</div>
+
+<div style="margin-top:12px">
+<strong>Log:</strong>
+<pre id="log" style="height:160px; overflow:auto; background:#fafafa; border:1px solid #eee; padding:8px"></pre>
+</div>
+
+<!-- Teachable Machine scripts (will be loaded dynamically based on model choice) -->
+<script>
+let model, maxPredictions;
+let webcamElement = document.getElementById('webcam');
+let stopWebcamFn = null;
+let autoMark = false;
+
+
+function log(text){
+const p = document.getElementById('log');
+p.textContent = new Date().toLocaleString() + ' — ' + text + '\n' + p.textContent;
+}
+
+async function startWebcam(){
+if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
+const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+webcamElement.srcObject = stream;
+stopWebcamFn = () => { stream.getTracks().forEach(t => t.stop()); webcamElement.srcObject = null; };
+return true;
+} else {
+alert('Webcam not supported in this browser');
+return false;
+}
+}
+
+async function loadModelFromUrl(modelUrl){
+// modelUrl should be the full path to model.json produced by Teachable Machine (TensorFlow.js)
+const scriptUrl = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js';
+if (!window.tf){
+const s = document.createElement('script'); s.src = scriptUrl; document.head.appendChild(s);
+await new Promise(res => s.onload = res);
+}
+const teachUrl = 'https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8.4/dist/teachablemachine-image.min.js';
+if (!window.tmImage){
+const s2 = document.createElement('script'); s2.src = teachUrl; document.head.appendChild(s2);
+await new Promise(res => s2.onload = res);
+}
+
+log('Loading model from ' + modelUrl);
+model = await window.tmImage.load(modelUrl, modelUrl.replace('model.json','metadata.json'));
+maxPredictions = model.getTotalClasses();
+const labels = model.metadata?.labels || model.getMetadata().labels;
+const select = document.getElementById('class-select');
+select.innerHTML = '';
+for (let i = 0; i < maxPredictions; i++) {
+  const opt = document.createElement('option');
+  opt.value = i;
+  opt.textContent = labels[i];
+  select.appendChild(opt);
+}
+log('Model loaded. Classes: ' + maxPredictions + ' — ' + labels.join(', '));
+
+}
+
+async function predictOnce(){
+if (!model) return null;
+const prediction = await model.predict(webcamElement);
+// find top result
+let best = {prob:0, className:'', classId:-1};
+prediction.forEach((p,i)=>{ if (p.probability > best.prob){ best = {prob: p.probability, className: p.className || model.getClassLabel(i), classId:i}; }});
+return best; // {prob, className, classId}
+}
+
+function markAttendance(className) {
+  const webappUrl = document.getElementById('webapp-url').value.trim();
+  if (!webappUrl) {
+    alert('Please paste your Apps Script Web App URL');
+    return;
+  }
+
+  fetch(webappUrl, {
+    method: "POST",
+    mode: "no-cors", // 👈 prevents CORS errors
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: className })
+  })
+  .then(() => {
+    log("Attendance marked successfully for " + className);
+  })
+  .catch(error => {
+    log("Error marking attendance: " + error);
+  });
+}
+
+
+document.getElementById('start-webcam').addEventListener('click', async ()=>{
+await startWebcam();
+log('Webcam started');
+});
+
+document.getElementById('load-model').addEventListener('click', async ()=>{
+const modelUrl = document.getElementById('model-url').value.trim();
+if (!modelUrl) { alert('Paste the full model.json URL from Teachable Machine export'); return; }
+await loadModelFromUrl(modelUrl);
+});
+
+
+document.getElementById('mark-btn').addEventListener('click', async ()=>{
+const select = document.getElementById('class-select');
+if (!select.value){ alert('Load model and select a class first'); return; }
+const className = select.options[select.selectedIndex].text;
+await markAttendance(className);
+});
+
+document.getElementById('auto-mark').addEventListener('click', ()=>{ autoMark = !autoMark; log('Auto-mark ' + (autoMark? 'ON':'OFF')); if (autoMark) autoLoop(); });
+
+
+async function autoLoop(){
+const threshold = parseFloat(document.getElementById('threshold').value) || 0.85;
+const select = document.getElementById('class-select');
+if (!model || !webcamElement.srcObject){ log('Model or webcam not ready for auto-loop'); return; }
+while(autoMark){
+const pred = await predictOnce();
+if (pred && pred.prob >= threshold){
+const className = pred.className;
+log('Auto-detected: ' + className + ' (' + (pred.prob*100).toFixed(1) + '%)');
+await markAttendance(className);
+// wait a bit to avoid duplicate rapid entries
+await new Promise(r => setTimeout(r, 5000));
+}
+await new Promise(r => setTimeout(r, 600));
+}
+}
+
+// stop webcam when page unloaded
+window.addEventListener('beforeunload', ()=>{ if (stopWebcamFn) stopWebcamFn(); });
+
+
+</script>
+</body>
+</html>

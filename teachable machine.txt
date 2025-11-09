@@ -1,0 +1,4 @@
+teachable machine: 
+https://teachablemachine.withgoogle.com/models/JNT1qpCpL/model.json
+
+web app: https://script.google.com/macros/s/AKfycbys89E8GJ5X0VG5p5yYRx8mjNVnnwYZcSCS1vF_oBXfZHg6U5b1UHFWHeo6JJvAqe_C/exec
