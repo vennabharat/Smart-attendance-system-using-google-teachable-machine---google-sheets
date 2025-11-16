@@ -2,3 +2,33 @@ teachable machine:
 https://teachablemachine.withgoogle.com/models/JNT1qpCpL/model.json
 
 web app: https://script.google.com/macros/s/AKfycbys89E8GJ5X0VG5p5yYRx8mjNVnnwYZcSCS1vF_oBXfZHg6U5b1UHFWHeo6JJvAqe_C/exec
+
+
+Google script:
+
+function doPost(e) {
+  try {
+    // Parse incoming data
+    const data = JSON.parse(e.postData.contents);
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    
+    // Append name and timestamp
+    sheet.appendRow([data.name, new Date()]);
+    
+    // Return JSON response
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: 'success', message: `Attendance saved for ${data.name}` }))
+      .setMimeType(ContentService.MimeType.JSON);
+      
+  } catch (error) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: 'error', message: error.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet() {
+  return ContentService
+    .createTextOutput("This endpoint only accepts POST requests.")
+    .setMimeType(ContentService.MimeType.TEXT);
+}
